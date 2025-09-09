@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Chat App</title>
+    <!-- Load React and Babel for JSX -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        /* Basic styling for responsive chat interface */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f2f5;
+        }
+
+        .chat-container {
+            max-width: 800px;
+            margin: 0 auto;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .chat-header {
+            background: #4267B2;
+            color: white;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            border-radius: 20px;
+            max-width: 70%;
+            word-wrap: break-word;
+        }
+
+        .message.own {
+            background: #007bff;
+            color: white;
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .message.other {
+            background: #e9ecef;
+            color: #333;
+        }
+
+        .message-info {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-bottom: 5px;
+        }
+
+        .input-container {
+            display: flex;
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #ddd;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            outline: none;
+            font-size: 16px;
+        }
+
+        .send-button {
+            margin-left: 10px;
+            padding: 12px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .send-button:hover {
+            background: #0056b3;
+        }
+
+        .connection-status {
+            padding: 10px;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .connected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        /* Responsive design for mobile */
+        @media (max-width: 768px) {
+            .chat-container {
+                height: 100vh;
+                margin: 0;
+            }
+            
+            .message {
+                max-width: 85%;
+            }
+            
+            .input-container {
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // Main Chat Application Component
+        const ChatApp = () => {
+            // State for managing messages, input, connection status, and user info
+            const [messages, setMessages] = React.useState([]);
+            const [messageInput, setMessageInput] = React.useState('');
+            const [isConnected, setIsConnected] = React.useState(false);
+            const [username, setUsername] = React.useState('');
+            const [ws, setWs] = React.useState(null);
+
+            // Reference for scrolling to bottom of messages
+            const messagesEndRef = React.useRef(null);
+
+            // Function to scroll to the bottom of messages
+            const scrollToBottom = () => {
+                messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            };
+
+            // Scroll to bottom whenever messages change
+            React.useEffect(() => {
+                scrollToBottom();
+            }, [messages]);
+
+            // Set up WebSocket connection when component mounts
+            React.useEffect(() => {
+                // Get username from user or set default
+                const name = prompt("Enter your username:") || `User${Math.floor(Math.random() * 1000)}`;
+                setUsername(name);
+
+                // Create WebSocket connection (using echo.websocket.org for demo)
+                const websocket = new WebSocket('wss://echo.websocket.org/');
+                
+                // When connection opens successfully
+                websocket.onopen = () => {
+                    console.log('Connected to WebSocket server');
+                    setIsConnected(true);
+                    
+                    // Send join message
+                    const joinMessage = {
+                        type: 'join',
+                        username: name,
+                        message: `${name} joined the chat`,
+                        timestamp: new Date().toLocaleTimeString()
+                    };
+                    websocket.send(JSON.stringify(joinMessage));
+                };
+
+                // When receiving a message from server
+                websocket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        // Add received message to messages list
+                        setMessages(prevMessages => [...prevMessages, {
+                            id: Date.now() + Math.random(),
+                            username: data.username,
+                            message: data.message,
+                            timestamp: data.timestamp,
+                            isOwn: data.username === name && data.type !== 'join'
+                        }]);
+                    } catch (error) {
+                        console.log('Received non-JSON message:', event.data);
+                    }
+                };
+
+                // When connection closes
+                websocket.onclose = () => {
+                    console.log('Disconnected from WebSocket server');
+                    setIsConnected(false);
+                };
+
+                // When connection has error
+                websocket.onerror = (error) => {
+                    console.log('WebSocket error:', error);
+                    setIsConnected(false);
+                };
+
+                setWs(websocket);
+
+                // Cleanup: close connection when component unmounts
+                return () => {
+                    websocket.close();
+                };
+            }, []);
+
+            // Function to send a new message
+            const sendMessage = () => {
+                // Check if message is not empty and WebSocket is connected
+                if (messageInput.trim() && ws && isConnected) {
+                    const messageData = {
+                        type: 'message',
+                        username: username,
+                        message: messageInput.trim(),
+                        timestamp: new Date().toLocaleTimeString()
+                    };
+
+                    // Send message through WebSocket
+                    ws.send(JSON.stringify(messageData));
+                    
+                    // Clear input field
+                    setMessageInput('');
+                }
+            };
+
+            // Handle Enter key press in input field
+            const handleKeyPress = (e) => {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            };
+
+            return (
+                <div className="chat-container">
+                    {/* Chat Header */}
+                    <div className="chat-header">
+                        <h1>Real-Time Chat</h1>
+                        <div>Welcome, {username}!</div>
+                    </div>
+
+                    {/* Connection Status */}
+                    <div className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
+                        {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
+                    </div>
+
+                    {/* Messages Display Area */}
+                    <div className="messages-container">
+                        {messages.length === 0 ? (
+                            <div style={{textAlign: 'center', color: '#666', marginTop: '50px'}}>
+                                No messages yet. Start the conversation!
+                            </div>
+                        ) : (
+                            messages.map((msg) => (
+                                <div 
+                                    key={msg.id} 
+                                    className={`message ${msg.isOwn ? 'own' : 'other'}`}
+                                >
+                                    {!msg.isOwn && (
+                                        <div className="message-info">
+                                            {msg.username} • {msg.timestamp}
+                                        </div>
+                                    )}
+                                    <div>{msg.message}</div>
+                                    {msg.isOwn && (
+                                        <div className="message-info">
+                                            {msg.timestamp}
+                                        </div>
+                                    )}
+                                </div>
+                            ))
+                        )}
+                        {/* Invisible element to scroll to */}
+                        <div ref={messagesEndRef} />
+                    </div>
+
+                    {/* Message Input Area */}
+                    <div className="input-container">
+                        <input
+                            type="text"
+                            className="message-input"
+                            placeholder="Type your message..."
+                            value={messageInput}
+                            onChange={(e) => setMessageInput(e.target.value)}
+                            onKeyPress={handleKeyPress}
+                            disabled={!isConnected}
+                        />
+                        <button 
+                            className="send-button"
+                            onClick={sendMessage}
+                            disabled={!isConnected || !messageInput.trim()}
+                        >
+                            Send
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // Render the Chat Application
+        ReactDOM.render(<ChatApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
